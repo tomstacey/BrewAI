@@ -310,4 +310,23 @@ function App() {
                 {loadingTips ? 'Generating...' : 'Get Carbon Saving Tips ✨'}
               </button>
               {carbonSavingTips && (
-                <div className="
+                <div className="mt-6 p-4 bg-purple-50 rounded-lg border border-purple-200 text-left text-gray-800">
+                  <h3 className="text-xl font-semibold text-purple-800 mb-2">Your Carbon Saving Tips:</h3>
+                  <div className="prose prose-purple max-w-none" dangerouslySetInnerHTML={{ __html: carbonSavingTips.replace(/\n/g, '<br />') }}></div>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {!loading && !carbonData && !weatherData && !error && (
+          <div className="text-center text-gray-500 py-8">
+            Enter a UK postcode above to see carbon intensity and weather data.
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+export default App;
