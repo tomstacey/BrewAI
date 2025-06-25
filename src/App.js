@@ -86,31 +86,28 @@ function App() {
           }
 
           // 2. Determine the user's region name from their admin_district.
-          // This is a simplified mapping but covers the vast majority of cases.
           const getRegionFromDistrict = (district) => {
-              // This mapping is based on common DNO regions. It's not perfect but is a solid heuristic.
               const districtLower = district.toLowerCase();
               if (districtLower.includes('council') || districtLower.includes('city of')) {
-                  // Examples: 'City of Edinburgh Council', 'Leeds City Council'
                   const mainName = district.replace(/council|city of/gi, '').trim();
-                  if (mainName.includes('Edinburgh') || mainName.includes('Glasgow') || mainName.includes('Aberdeen')) return 'South Scotland'; // Simplified
+                  if (mainName.includes('Edinburgh') || mainName.includes('Glasgow') || mainName.includes('Aberdeen')) return 'South Scotland';
                   if (mainName.includes('Dundee')) return 'North Scotland';
               }
-              // Add more specific mappings here if needed, otherwise fallback to a general search.
-              // A more advanced solution would use a full district-to-DNO mapping table.
-              return admin_district; // Use the district name to search in the shortname.
+              return admin_district;
           };
           
           const targetRegionName = getRegionFromDistrict(admin_district);
           console.log(`Mapping district to target region: ${targetRegionName}`);
 
-          // 3. Find the matching region from the fetched data.
-          const userRegion = allRegionsData.find(region => region.shortname.includes(targetRegionName) || targetRegionName.includes(region.shortname));
+          // 3. Find the matching region from the fetched data with a robust check.
+          const userRegion = allRegionsData.find(region => 
+            // ***FIX: Check if region and region.shortname exist before trying to use them.***
+            region && region.shortname && (region.shortname.includes(targetRegionName) || targetRegionName.includes(region.shortname))
+          );
 
           if (!userRegion || !userRegion.data) {
               console.warn(`Could not find a direct match for '${targetRegionName}'. Defaulting to South East England.`);
-              // Fallback to a major region if no match is found, as it's better than failing.
-              const fallbackRegion = allRegionsData.find(r => r.shortname === 'South East England');
+              const fallbackRegion = allRegionsData.find(r => r && r.shortname === 'South East England');
                if (!fallbackRegion) throw new Error('Could not find fallback region data.');
                return { regionalIntensityData: fallbackRegion.data, regionName: fallbackRegion.shortname };
           }
