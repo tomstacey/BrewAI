@@ -24,8 +24,11 @@ function App() {
   const [carbonSavingTips, setCarbonSavingTips] = useState(''); // To store LLM generated tips
   const [loadingTips, setLoadingTips] = useState(false); // Loading state for LLM tips
 
-  // IMPORTANT: Replace with your actual key in a real-world app, but for Vercel, use Environment Variables.
-  const OPENWEATHERMAP_API_KEY = '095d54ffa1732d9bd45d0850923af4ad';
+  // ***FIX: Use Environment Variables for API Keys***
+  // Your previous key was exposed on GitHub and likely deactivated.
+  // Get a new key from OpenWeatherMap and add it to your Vercel project's Environment Variables.
+  // The variable name must be REACT_APP_OPENWEATHERMAP_API_KEY
+  const OPENWEATHERMAP_API_KEY = process.env.REACT_APP_OPENWEATHERMAP_API_KEY;
 
   // Function to close error modal
   const closeErrorModal = () => {
@@ -49,7 +52,7 @@ function App() {
       return;
     }
 
-    // ***FIX 1: Sanitize the postcode by removing all spaces for the Carbon Intensity API***
+    // Sanitize the postcode by removing all spaces for the Carbon Intensity API
     const sanitizedPostcode = postcode.replace(/\s+/g, '');
 
     try {
@@ -67,8 +70,8 @@ function App() {
       const { latitude, longitude } = postcodeJson.result;
 
       // 2. Fetch Weather Data
-      if (!OPENWEATHERMAP_API_KEY || OPENWEATHERMAP_API_KEY === 'YOUR_OPENWEATHERMAP_API_KEY') {
-        throw new Error('OpenWeatherMap API Key is missing. Please configure it in your Vercel environment variables.');
+      if (!OPENWEATHERMAP_API_KEY) {
+        throw new Error('OpenWeatherMap API Key is not configured. Please add REACT_APP_OPENWEATHERMAP_API_KEY to your Vercel environment variables.');
       }
 
       console.log('Fetching weather data...');
@@ -137,7 +140,7 @@ function App() {
       const nationalMap = new Map();
       nationalData.forEach(item => nationalMap.set(item.from, item.intensity.forecast));
 
-      // ***FIX 2: Sort the data using the reliable ISO string BEFORE formatting for the chart***
+      // Sort the data using the reliable ISO string BEFORE formatting for the chart
       const mergedData = regionalData
         .map(regionalItem => ({
           isoTime: regionalItem.from, // Keep original time for sorting
