@@ -13,7 +13,6 @@ function App() {
   const [loadingTips, setLoadingTips] = useState(false);
 
   // Reads the API key from Vercel's Environment Variables.
-  // This is the correct and secure way to handle API keys.
   const OPENWEATHERMAP_API_KEY = process.env.REACT_APP_OPENWEATHERMAP_API_KEY;
 
   const closeErrorModal = () => {
@@ -63,13 +62,12 @@ function App() {
       const weatherJson = await weatherResponse.json();
       setWeatherData(weatherJson);
 
-      // ***FIX: Use a more reliable, combined API endpoint for Carbon Intensity***
+      // 3. Fetch Carbon Intensity data
       const now = new Date();
       const from = new Date(now.getTime() - 24 * 60 * 60 * 1000).toISOString();
       const to = new Date(now.getTime() + 24 * 60 * 60 * 1000).toISOString();
 
       console.log('Fetching carbon intensity data...');
-      // This new endpoint gets regional data by postcode directly, which is more robust.
       const regionalUrl = `https://api.carbonintensity.org.uk/regional/intensity/${from}/${to}/postcode/${sanitizedPostcode}`;
       const nationalUrl = `https://api.carbonintensity.org.uk/intensity/${from}/${to}`;
 
@@ -89,10 +87,16 @@ function App() {
 
       const regionalJson = await regionalResponse.json();
       const nationalJson = await nationalResponse.json();
+      
+      // ***FIX: Add robust checks for the nested data structure from the API***
+      if (!regionalJson.data || !regionalJson.data[0] || !regionalJson.data[0].data || !regionalJson.data[0].data[0]) {
+        throw new Error('Carbon Intensity API returned an unexpected or incomplete data structure for this region.');
+      }
 
-      // Extract the region name and intensity data from the new, combined response
-      const regionName = regionalJson.data[0].shortname;
-      const regionalIntensityData = regionalJson.data[0].data;
+      // Correctly access the deeply nested data
+      const regionDataContainer = regionalJson.data[0].data[0];
+      const regionName = regionDataContainer.shortname;
+      const regionalIntensityData = regionDataContainer.data;
       const nationalIntensityData = nationalJson.data;
       
       setCarbonRegionName(regionName);
@@ -219,7 +223,7 @@ function App() {
           </button>
         </div>
 
-        {weatherData && (
+        {weatherData && weatherData.weather && weatherData.weather[0] && (
           <div className="bg-gradient-to-br from-blue-500 to-blue-600 text-white rounded-xl shadow-lg p-6 mb-8 flex flex-col md:flex-row items-center justify-between">
             <div className="flex items-center mb-4 md:mb-0">
               <img
