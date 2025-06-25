@@ -12,8 +12,9 @@ function App() {
   const [carbonSavingTips, setCarbonSavingTips] = useState('');
   const [loadingTips, setLoadingTips] = useState(false);
 
-  // Reads the API key from Vercel's Environment Variables.
+  // Reads API keys from Vercel's Environment Variables.
   const OPENWEATHERMAP_API_KEY = process.env.REACT_APP_OPENWEATHERMAP_API_KEY;
+  const GEMINI_API_KEY = process.env.REACT_APP_GEMINI_API_KEY;
 
   const closeErrorModal = () => {
     setShowErrorModal(false);
@@ -148,15 +149,12 @@ function App() {
         }
       });
       
-      // *** FINAL, ROBUST MERGE LOGIC ***
-      // Start with the reliable national data.
       let mergedData = nationalIntensityData.map(nationalItem => ({
           isoTime: nationalItem.from,
-          localIntensity: null, // Default to null
+          localIntensity: null,
           nationalIntensity: nationalItem.intensity.forecast,
       }));
       
-      // If we successfully got regional data, merge it in.
       if (regionalIntensityData) {
           const regionalMap = new Map();
           regionalIntensityData.forEach(item => {
@@ -173,7 +171,7 @@ function App() {
       }
 
       const finalChartData = mergedData
-        .filter(item => item.nationalIntensity !== null) // Only need to check national now
+        .filter(item => item.nationalIntensity !== null)
         .sort((a, b) => new Date(a.isoTime) - new Date(b.isoTime))
         .map(item => ({
           ...item,
@@ -195,6 +193,11 @@ function App() {
     setLoadingTips(true);
     setCarbonSavingTips('');
     try {
+      // ***FIX: Check for the Gemini API Key***
+      if (!GEMINI_API_KEY) {
+          throw new Error('Gemini API Key is not configured. Please add REACT_APP_GEMINI_API_KEY to your Vercel environment variables.');
+      }
+
       if (!carbonData || carbonData.length === 0) {
         throw new Error("No carbon intensity data available to generate tips.");
       }
@@ -215,8 +218,8 @@ function App() {
       const prompt = `Given that the current carbon intensity in ${promptRegion} is ${promptLocalIntensity} (compared to a national average of ${currentNationalIntensity} gCO2/kWh), provide 3 concise and actionable tips for a UK household to reduce their electricity carbon footprint. If the local intensity is unknown, base the tips on the national average. Format the response as a simple list.`;
 
       const payload = { contents: [{ role: "user", parts: [{ text: prompt }] }] };
-      const apiKey = ""; // Provided by Canvas at runtime
-      const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`;
+      // ***FIX: Use the GEMINI_API_KEY from environment variables***
+      const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${GEMINI_API_KEY}`;
 
       const response = await fetch(apiUrl, {
         method: 'POST',
@@ -347,7 +350,6 @@ function App() {
                 />
                 <Legend wrapperStyle={{ paddingTop: '20px' }} />
                 
-                {/* Conditionally render the local intensity line only if data is available */}
                 {carbonRegionName && <Line
                   type="monotone"
                   dataKey="localIntensity"
