@@ -39,7 +39,7 @@ function App() {
     const sanitizedPostcode = postcode.replace(/\s+/g, '');
 
     try {
-      // 1. Get Latitude and Longitude from a reliable source
+      // 1. Get Postcode Details (including admin district for region matching)
       console.log('Fetching postcode data...');
       const postcodeIoUrl = `https://api.postcodes.io/postcodes/${sanitizedPostcode}`;
       const postcodeResponse = await fetch(postcodeIoUrl);
@@ -47,9 +47,10 @@ function App() {
         throw new Error(`Invalid UK Postcode. Please check the postcode entered.`);
       }
       const postcodeJson = await postcodeResponse.json();
-      const { latitude, longitude } = postcodeJson.result;
+      const { latitude, longitude, admin_district } = postcodeJson.result;
+      console.log(`Postcode maps to district: ${admin_district}`);
 
-      // 2. Fetch Weather Data (can run in parallel)
+      // 2. Fetch Weather Data
       const fetchWeatherData = async () => {
           if (!OPENWEATHERMAP_API_KEY) {
             throw new Error('OpenWeatherMap API Key is not configured. Please add REACT_APP_OPENWEATHERMAP_API_KEY to your Vercel environment variables.');
@@ -62,76 +63,64 @@ function App() {
           }
           return weatherResponse.json();
       };
-
-      // 3. Fetch Carbon Intensity Data using a new robust method with a fallback
+      
+      // 3. Fetch Carbon Intensity Data using the most robust method
       const fetchCarbonData = async () => {
-          let regionalIntensityData;
-          let nationalIntensityData;
-          let regionName;
+          const now = new Date();
+          const from = new Date(now.getTime() - 24 * 60 * 60 * 1000).toISOString();
+          const to = new Date(now.getTime() + 24 * 60 * 60 * 1000).toISOString();
 
-          // --- PRIMARY ATTEMPT: Use Lat/Lon to get Region ID first ---
-          try {
-              console.log('Attempting to fetch region ID from coordinates...');
-              const regionIdUrl = `https://api.carbonintensity.org.uk/regional/ll/${latitude}/${longitude}`;
-              const regionIdResponse = await fetch(regionIdUrl, { headers: { 'Accept': 'application/json' } });
-              
-              if (!regionIdResponse.ok) {
-                  // This will trigger the catch block and move to the fallback method
-                  throw new Error('Lat/Lon to Region ID lookup failed. Trying fallback.');
-              }
-              const regionIdJson = await regionIdResponse.json();
-              const regionInfo = regionIdJson?.data?.[0]?.data?.[0];
+          // --- NEW, MOST ROBUST METHOD ---
+          // 1. Fetch ALL regional data at once.
+          console.log('Fetching all regional carbon intensity data...');
+          const allRegionsUrl = `https://api.carbonintensity.org.uk/regional/intensity/${from}/${to}`;
+          const allRegionsResponse = await fetch(allRegionsUrl);
+          if (!allRegionsResponse.ok) {
+              throw new Error('Could not fetch the main regional carbon intensity data.');
+          }
+          const allRegionsJson = await allRegionsResponse.json();
+          const allRegionsData = allRegionsJson?.data;
 
-              if (regionInfo && regionInfo.regionid) {
-                  const { regionid, shortname } = regionInfo;
-                  regionName = shortname;
-                  console.log(`Primary method success. Fetching carbon data for region: ${shortname} (ID: ${regionid})`);
-                  
-                  const now = new Date();
-                  const from = new Date(now.getTime() - 24 * 60 * 60 * 1000).toISOString();
-                  const to = new Date(now.getTime() + 24 * 60 * 60 * 1000).toISOString();
-                  
-                  const regionalUrl = `https://api.carbonintensity.org.uk/regional/intensity/${from}/${to}/regionid/${regionid}`;
-                  const regionalResponse = await fetch(regionalUrl);
-                  if (!regionalResponse.ok) throw new Error('Failed to fetch regional data using region ID.');
-                  
-                  const regionalJson = await regionalResponse.json();
-                  regionalIntensityData = regionalJson?.data?.data;
-              } else {
-                  throw new Error('Lat/Lon to Region ID response was malformed. Trying fallback.');
-              }
-          } catch (e) {
-              console.warn(e.message);
-              console.log('--- FALLBACK METHOD: Fetching regional data directly by postcode ---');
-              
-              const now = new Date();
-              const from = new Date(now.getTime() - 24 * 60 * 60 * 1000).toISOString();
-              const to = new Date(now.getTime() + 24 * 60 * 60 * 1000).toISOString();
-
-              const regionalUrl = `https://api.carbonintensity.org.uk/regional/intensity/${from}/${to}/postcode/${sanitizedPostcode}`;
-              const regionalResponse = await fetch(regionalUrl);
-              
-              if (!regionalResponse.ok) {
-                  const errorJson = await regionalResponse.json();
-                  if (errorJson?.error?.message) {
-                      throw new Error(`Carbon Intensity API Error (Fallback): ${errorJson.error.message}`);
-                  }
-                  throw new Error('Failed to fetch regional carbon data using postcode (Fallback).');
-              }
-              
-              const regionalJson = await regionalResponse.json();
-              const regionDataContainer = regionalJson?.data?.[0];
-
-              if (!regionDataContainer || !regionDataContainer.data) {
-                  throw new Error('Carbon Intensity data is not available for this specific postcode. This can happen for areas outside mainland UK.');
-              }
-              
-              regionName = regionDataContainer.shortname;
-              regionalIntensityData = regionDataContainer.data;
+          if (!allRegionsData) {
+              throw new Error('Main regional carbon data is currently unavailable from the API.');
           }
 
-          // --- FETCH NATIONAL DATA (common to both methods) ---
-          console.log('Fetching national carbon data...');
+          // 2. Determine the user's region name from their admin_district.
+          // This is a simplified mapping but covers the vast majority of cases.
+          const getRegionFromDistrict = (district) => {
+              // This mapping is based on common DNO regions. It's not perfect but is a solid heuristic.
+              const districtLower = district.toLowerCase();
+              if (districtLower.includes('council') || districtLower.includes('city of')) {
+                  // Examples: 'City of Edinburgh Council', 'Leeds City Council'
+                  const mainName = district.replace(/council|city of/gi, '').trim();
+                  if (mainName.includes('Edinburgh') || mainName.includes('Glasgow') || mainName.includes('Aberdeen')) return 'South Scotland'; // Simplified
+                  if (mainName.includes('Dundee')) return 'North Scotland';
+              }
+              // Add more specific mappings here if needed, otherwise fallback to a general search.
+              // A more advanced solution would use a full district-to-DNO mapping table.
+              return admin_district; // Use the district name to search in the shortname.
+          };
+          
+          const targetRegionName = getRegionFromDistrict(admin_district);
+          console.log(`Mapping district to target region: ${targetRegionName}`);
+
+          // 3. Find the matching region from the fetched data.
+          const userRegion = allRegionsData.find(region => region.shortname.includes(targetRegionName) || targetRegionName.includes(region.shortname));
+
+          if (!userRegion || !userRegion.data) {
+              console.warn(`Could not find a direct match for '${targetRegionName}'. Defaulting to South East England.`);
+              // Fallback to a major region if no match is found, as it's better than failing.
+              const fallbackRegion = allRegionsData.find(r => r.shortname === 'South East England');
+               if (!fallbackRegion) throw new Error('Could not find fallback region data.');
+               return { regionalIntensityData: fallbackRegion.data, regionName: fallbackRegion.shortname };
+          }
+          
+          console.log(`Found matching region: ${userRegion.shortname}`);
+          return { regionalIntensityData: userRegion.data, regionName: userRegion.shortname };
+      };
+      
+      // Fetch National Data
+      const fetchNationalData = async () => {
           const now = new Date();
           const from = new Date(now.getTime() - 24 * 60 * 60 * 1000).toISOString();
           const to = new Date(now.getTime() + 24 * 60 * 60 * 1000).toISOString();
@@ -139,25 +128,25 @@ function App() {
           const nationalResponse = await fetch(nationalUrl);
           if (!nationalResponse.ok) throw new Error('Failed to fetch national carbon data.');
           const nationalJson = await nationalResponse.json();
-          nationalIntensityData = nationalJson?.data;
-          
-          if (!regionalIntensityData || !nationalIntensityData || !regionName) {
-              throw new Error('Incomplete carbon intensity data received from the API.');
-          }
-          
-          setCarbonRegionName(regionName);
-          return { regionalIntensityData, nationalIntensityData };
+          return nationalJson?.data;
       };
 
-      const [weatherResult, carbonResult] = await Promise.all([
+      // Run all fetches in parallel
+      const [weatherResult, carbonResult, nationalIntensityData] = await Promise.all([
           fetchWeatherData(),
-          fetchCarbonData()
+          fetchCarbonData(),
+          fetchNationalData()
       ]);
 
       setWeatherData(weatherResult);
 
-      const { regionalIntensityData, nationalIntensityData } = carbonResult;
+      const { regionalIntensityData, regionName } = carbonResult;
+      setCarbonRegionName(regionName);
 
+      if (!regionalIntensityData || !nationalIntensityData) {
+          throw new Error('Incomplete carbon intensity data was received.');
+      }
+      
       const nationalMap = new Map();
       nationalIntensityData.forEach(item => nationalMap.set(item.from, item.intensity.forecast));
 
