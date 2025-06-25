@@ -81,7 +81,7 @@ function App() {
           const allRegionsJson = await allRegionsResponse.json();
           const allRegionsData = allRegionsJson?.data;
 
-          if (!allRegionsData) {
+          if (!allRegionsData || allRegionsData.length === 0) {
               throw new Error('Main regional carbon data is currently unavailable from the API.');
           }
 
@@ -101,14 +101,16 @@ function App() {
 
           // 3. Find the matching region from the fetched data with a robust check.
           const userRegion = allRegionsData.find(region => 
-            // ***FIX: Check if region and region.shortname exist before trying to use them.***
             region && region.shortname && (region.shortname.includes(targetRegionName) || targetRegionName.includes(region.shortname))
           );
 
           if (!userRegion || !userRegion.data) {
-              console.warn(`Could not find a direct match for '${targetRegionName}'. Defaulting to South East England.`);
-              const fallbackRegion = allRegionsData.find(r => r && r.shortname === 'South East England');
-               if (!fallbackRegion) throw new Error('Could not find fallback region data.');
+              console.warn(`Could not find a direct match for '${targetRegionName}'. Defaulting to the first available region in the list.`);
+              // ***FINAL FIX: Instead of looking for a specific fallback, use the first valid region from the API response.***
+              const fallbackRegion = allRegionsData[0];
+               if (!fallbackRegion || !fallbackRegion.data) {
+                   throw new Error('Could not find any valid regional data in the API response.');
+                }
                return { regionalIntensityData: fallbackRegion.data, regionName: fallbackRegion.shortname };
           }
           
