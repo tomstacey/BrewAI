@@ -88,13 +88,13 @@ function App() {
       const regionalJson = await regionalResponse.json();
       const nationalJson = await nationalResponse.json();
       
-      // ***FIX: Use optional chaining (?.) for robust nested data access to prevent crash on null values.***
-      const regionDataContainer = regionalJson?.data?.[0]?.data?.[0];
+      // Use optional chaining (?.) for safe nested data access.
+      const regionDataContainer = regionalJson?.data?.[0];
       const nationalIntensityData = nationalJson?.data;
 
-      // Check if the necessary data structures exist after safe access
+      // ***FINAL FIX: Add a definitive check to ensure the nested data exists before trying to use it.***
       if (!regionDataContainer || !regionDataContainer.data || !nationalIntensityData) {
-        throw new Error('Carbon Intensity API returned an unexpected or incomplete data structure for this region.');
+        throw new Error('Carbon Intensity data is not available for this specific postcode. This can happen for areas outside mainland UK.');
       }
 
       const regionName = regionDataContainer.shortname;
