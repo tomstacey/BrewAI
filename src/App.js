@@ -100,13 +100,19 @@ function App() {
           console.log(`Mapping district to target region: ${targetRegionName}`);
 
           // 3. Find the matching region from the fetched data with a robust check.
-          const userRegion = allRegionsData.find(region => 
-            region && region.shortname && (region.shortname.includes(targetRegionName) || targetRegionName.includes(region.shortname))
-          );
+          let userRegion = null;
+          // ***FINAL, MOST ROBUST FIX: Use a standard for-loop for maximum safety against malformed array items.***
+          for (let i = 0; i < allRegionsData.length; i++) {
+              const region = allRegionsData[i];
+              if (region && typeof region.shortname === 'string' && (region.shortname.includes(targetRegionName) || targetRegionName.includes(region.shortname))) {
+                  userRegion = region;
+                  break; // Exit the loop once a match is found
+              }
+          }
+
 
           if (!userRegion || !userRegion.data) {
               console.warn(`Could not find a direct match for '${targetRegionName}'. Defaulting to the first valid region in the list.`);
-              // ***FINAL FIX: Search for the first valid region instead of just assuming the first one is ok.***
               const fallbackRegion = allRegionsData.find(r => r && r.data && r.data.length > 0);
 
                if (!fallbackRegion) {
@@ -149,15 +155,25 @@ function App() {
       }
       
       const nationalMap = new Map();
-      nationalIntensityData.forEach(item => nationalMap.set(item.from, item.intensity.forecast));
+      nationalIntensityData.forEach(item => {
+        // Ensure item and its nested properties exist before accessing
+        if (item && item.from && item.intensity && typeof item.intensity.forecast !== 'undefined') {
+            nationalMap.set(item.from, item.intensity.forecast);
+        }
+      });
 
       const mergedData = regionalIntensityData
-        .map(regionalItem => ({
-          isoTime: regionalItem.from,
-          localIntensity: regionalItem.intensity.forecast,
-          nationalIntensity: nationalMap.get(regionalItem.from) || null,
-        }))
-        .filter(item => item.localIntensity !== null && item.nationalIntensity !== null)
+        .map(regionalItem => {
+            if (regionalItem && regionalItem.from && regionalItem.intensity && typeof regionalItem.intensity.forecast !== 'undefined') {
+                return {
+                    isoTime: regionalItem.from,
+                    localIntensity: regionalItem.intensity.forecast,
+                    nationalIntensity: nationalMap.get(regionalItem.from) || null,
+                };
+            }
+            return null; // Return null for invalid items
+        })
+        .filter(item => item && item.localIntensity !== null && item.nationalIntensity !== null) // Filter out null and incomplete items
         .sort((a, b) => new Date(a.isoTime) - new Date(b.isoTime))
         .map(item => ({
           ...item,
