@@ -88,16 +88,17 @@ function App() {
       const regionalJson = await regionalResponse.json();
       const nationalJson = await nationalResponse.json();
       
-      // ***FIX: Add robust checks for the nested data structure from the API***
-      if (!regionalJson.data || !regionalJson.data[0] || !regionalJson.data[0].data || !regionalJson.data[0].data[0]) {
+      // ***FIX: Use optional chaining (?.) for robust nested data access to prevent crash on null values.***
+      const regionDataContainer = regionalJson?.data?.[0]?.data?.[0];
+      const nationalIntensityData = nationalJson?.data;
+
+      // Check if the necessary data structures exist after safe access
+      if (!regionDataContainer || !regionDataContainer.data || !nationalIntensityData) {
         throw new Error('Carbon Intensity API returned an unexpected or incomplete data structure for this region.');
       }
 
-      // Correctly access the deeply nested data
-      const regionDataContainer = regionalJson.data[0].data[0];
       const regionName = regionDataContainer.shortname;
       const regionalIntensityData = regionDataContainer.data;
-      const nationalIntensityData = nationalJson.data;
       
       setCarbonRegionName(regionName);
 
@@ -309,23 +310,4 @@ function App() {
                 {loadingTips ? 'Generating...' : 'Get Carbon Saving Tips ✨'}
               </button>
               {carbonSavingTips && (
-                <div className="mt-6 p-4 bg-purple-50 rounded-lg border border-purple-200 text-left text-gray-800">
-                  <h3 className="text-xl font-semibold text-purple-800 mb-2">Your Carbon Saving Tips:</h3>
-                  <div className="prose prose-purple max-w-none" dangerouslySetInnerHTML={{ __html: carbonSavingTips.replace(/\n/g, '<br />') }}></div>
-                </div>
-              )}
-            </div>
-          </div>
-        )}
-
-        {!loading && !carbonData && !weatherData && !error && (
-          <div className="text-center text-gray-500 py-8">
-            Enter a UK postcode above to see carbon intensity and weather data.
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
-
-export default App;
+                <div className="
