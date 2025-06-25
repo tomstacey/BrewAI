@@ -64,28 +64,27 @@ function App() {
           return weatherResponse.json();
       };
       
-      // 3. Fetch Carbon Intensity Data using the most robust method
+      // 3. Fetch Carbon Intensity Data
       const fetchCarbonData = async () => {
           const now = new Date();
           const from = new Date(now.getTime() - 24 * 60 * 60 * 1000).toISOString();
           const to = new Date(now.getTime() + 24 * 60 * 60 * 1000).toISOString();
 
-          // --- NEW, MOST ROBUST METHOD ---
-          // 1. Fetch ALL regional data at once.
           console.log('Fetching all regional carbon intensity data...');
           const allRegionsUrl = `https://api.carbonintensity.org.uk/regional/intensity/${from}/${to}`;
           const allRegionsResponse = await fetch(allRegionsUrl);
           if (!allRegionsResponse.ok) {
-              throw new Error('Could not fetch the main regional carbon intensity data.');
+             console.error('Could not fetch main regional data. Defaulting to national only.');
+             return { regionalIntensityData: null, regionName: null };
           }
           const allRegionsJson = await allRegionsResponse.json();
           const allRegionsData = allRegionsJson?.data;
 
           if (!allRegionsData || allRegionsData.length === 0) {
-              throw new Error('Main regional carbon data is currently unavailable from the API.');
+              console.error('Main regional carbon data is empty. Defaulting to national only.');
+              return { regionalIntensityData: null, regionName: null };
           }
 
-          // 2. Determine the user's region name from their admin_district.
           const getRegionFromDistrict = (district) => {
               const districtLower = district.toLowerCase();
               if (districtLower.includes('council') || districtLower.includes('city of')) {
@@ -99,41 +98,26 @@ function App() {
           const targetRegionName = getRegionFromDistrict(admin_district);
           console.log(`Mapping district to target region: ${targetRegionName}`);
 
-          // 3. Find the matching region from the fetched data with a robust check.
-          let userRegion = null;
-          // ***FINAL, MOST ROBUST FIX: Use a standard for-loop for maximum safety against malformed array items.***
-          for (let i = 0; i < allRegionsData.length; i++) {
-              const region = allRegionsData[i];
-              if (region && typeof region.shortname === 'string' && (region.shortname.includes(targetRegionName) || targetRegionName.includes(region.shortname))) {
-                  userRegion = region;
-                  break; // Exit the loop once a match is found
-              }
-          }
+          const userRegion = allRegionsData.find(region => 
+            region && typeof region.shortname === 'string' && (region.shortname.includes(targetRegionName) || targetRegionName.includes(region.shortname))
+          );
 
-
-          if (!userRegion || !userRegion.data) {
-              console.warn(`Could not find a direct match for '${targetRegionName}'. Defaulting to the first valid region in the list.`);
-              const fallbackRegion = allRegionsData.find(r => r && r.data && r.data.length > 0);
-
-               if (!fallbackRegion) {
-                   throw new Error('Could not find any valid regional data in the API response.');
-                }
-               console.log(`Using fallback region: ${fallbackRegion.shortname}`);
-               return { regionalIntensityData: fallbackRegion.data, regionName: fallbackRegion.shortname };
+          if (!userRegion || !userRegion.data || userRegion.data.length === 0) {
+              console.warn(`Could not find a match for '${targetRegionName}'. Regional data will not be shown.`);
+              return { regionalIntensityData: null, regionName: null };
           }
           
           console.log(`Found matching region: ${userRegion.shortname}`);
           return { regionalIntensityData: userRegion.data, regionName: userRegion.shortname };
       };
       
-      // Fetch National Data
       const fetchNationalData = async () => {
           const now = new Date();
           const from = new Date(now.getTime() - 24 * 60 * 60 * 1000).toISOString();
           const to = new Date(now.getTime() + 24 * 60 * 60 * 1000).toISOString();
           const nationalUrl = `https://api.carbonintensity.org.uk/intensity/${from}/${to}`;
           const nationalResponse = await fetch(nationalUrl);
-          if (!nationalResponse.ok) throw new Error('Failed to fetch national carbon data.');
+          if (!nationalResponse.ok) throw new Error('Failed to fetch national carbon data. The service may be temporarily unavailable.');
           const nationalJson = await nationalResponse.json();
           return nationalJson?.data;
       };
@@ -148,39 +132,55 @@ function App() {
       setWeatherData(weatherResult);
 
       const { regionalIntensityData, regionName } = carbonResult;
-      setCarbonRegionName(regionName);
+      
+      if (regionName) {
+        setCarbonRegionName(regionName);
+      }
 
-      if (!regionalIntensityData || !nationalIntensityData) {
-          throw new Error('Incomplete carbon intensity data was received.');
+      if (!nationalIntensityData) {
+          throw new Error('Could not retrieve national carbon intensity data. The service may be down.');
       }
       
       const nationalMap = new Map();
       nationalIntensityData.forEach(item => {
-        // Ensure item and its nested properties exist before accessing
         if (item && item.from && item.intensity && typeof item.intensity.forecast !== 'undefined') {
             nationalMap.set(item.from, item.intensity.forecast);
         }
       });
+      
+      // *** FINAL, ROBUST MERGE LOGIC ***
+      // Start with the reliable national data.
+      let mergedData = nationalIntensityData.map(nationalItem => ({
+          isoTime: nationalItem.from,
+          localIntensity: null, // Default to null
+          nationalIntensity: nationalItem.intensity.forecast,
+      }));
+      
+      // If we successfully got regional data, merge it in.
+      if (regionalIntensityData) {
+          const regionalMap = new Map();
+          regionalIntensityData.forEach(item => {
+              if (item && item.from && item.intensity && typeof item.intensity.forecast !== 'undefined') {
+                  regionalMap.set(item.from, item.intensity.forecast);
+              }
+          });
+          
+          mergedData.forEach(item => {
+              if (regionalMap.has(item.isoTime)) {
+                  item.localIntensity = regionalMap.get(item.isoTime);
+              }
+          });
+      }
 
-      const mergedData = regionalIntensityData
-        .map(regionalItem => {
-            if (regionalItem && regionalItem.from && regionalItem.intensity && typeof regionalItem.intensity.forecast !== 'undefined') {
-                return {
-                    isoTime: regionalItem.from,
-                    localIntensity: regionalItem.intensity.forecast,
-                    nationalIntensity: nationalMap.get(regionalItem.from) || null,
-                };
-            }
-            return null; // Return null for invalid items
-        })
-        .filter(item => item && item.localIntensity !== null && item.nationalIntensity !== null) // Filter out null and incomplete items
+      const finalChartData = mergedData
+        .filter(item => item.nationalIntensity !== null) // Only need to check national now
         .sort((a, b) => new Date(a.isoTime) - new Date(b.isoTime))
         .map(item => ({
           ...item,
           time: new Date(item.isoTime).toLocaleString('en-GB', { hour: '2-digit', minute: '2-digit', day: 'numeric', month: 'short' }),
         }));
 
-      setCarbonData(mergedData);
+      setCarbonData(finalChartData);
 
     } catch (err) {
       console.error("Error during data fetch:", err);
@@ -208,8 +208,11 @@ function App() {
 
       const currentLocalIntensity = latestCarbon.localIntensity;
       const currentNationalIntensity = latestCarbon.nationalIntensity;
+      
+      const promptRegion = carbonRegionName || 'your region';
+      const promptLocalIntensity = currentLocalIntensity ? `${currentLocalIntensity} gCO2/kWh` : 'an unknown value';
 
-      const prompt = `Given that the current carbon intensity in ${carbonRegionName} is ${currentLocalIntensity} gCO2/kWh (compared to a national average of ${currentNationalIntensity} gCO2/kWh), provide 3 concise and actionable tips for a UK household to reduce their electricity carbon footprint. Format the response as a simple list.`;
+      const prompt = `Given that the current carbon intensity in ${promptRegion} is ${promptLocalIntensity} (compared to a national average of ${currentNationalIntensity} gCO2/kWh), provide 3 concise and actionable tips for a UK household to reduce their electricity carbon footprint. If the local intensity is unknown, base the tips on the national average. Format the response as a simple list.`;
 
       const payload = { contents: [{ role: "user", parts: [{ text: prompt }] }] };
       const apiKey = ""; // Provided by Canvas at runtime
@@ -310,9 +313,10 @@ function App() {
 
         {carbonData && carbonData.length > 0 && (
           <div className="bg-white rounded-xl shadow-lg p-4 md:p-6 mb-6">
-            <h2 className="text-2xl font-bold text-gray-900 mb-4 text-center">
+            <h2 className="text-2xl font-bold text-gray-900 mb-2 text-center">
               Carbon Intensity (gCO₂/kWh)
             </h2>
+            {!carbonRegionName && <p className="text-center text-sm text-gray-500 mb-4">Regional data unavailable, showing National Average only.</p>}
             <ResponsiveContainer width="100%" height={400}>
               <LineChart
                 data={carbonData}
@@ -342,7 +346,9 @@ function App() {
                   formatter={(value, name) => [`${value}`, name === 'localIntensity' ? `Your Area (${carbonRegionName})` : 'National Average']}
                 />
                 <Legend wrapperStyle={{ paddingTop: '20px' }} />
-                <Line
+                
+                {/* Conditionally render the local intensity line only if data is available */}
+                {carbonRegionName && <Line
                   type="monotone"
                   dataKey="localIntensity"
                   stroke="#8884d8"
@@ -350,7 +356,8 @@ function App() {
                   activeDot={{ r: 8 }}
                   name={`Your Area (${carbonRegionName})`}
                   dot={false}
-                />
+                />}
+
                 <Line
                   type="monotone"
                   dataKey="nationalIntensity"
