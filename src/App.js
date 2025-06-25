@@ -39,7 +39,7 @@ function App() {
     const sanitizedPostcode = postcode.replace(/\s+/g, '');
 
     try {
-      // 1. Get Latitude and Longitude from postcode.io for weather data
+      // 1. Get Latitude and Longitude from a reliable source
       console.log('Fetching postcode data...');
       const postcodeIoUrl = `https://api.postcodes.io/postcodes/${sanitizedPostcode}`;
       const postcodeResponse = await fetch(postcodeIoUrl);
@@ -49,58 +49,76 @@ function App() {
       const postcodeJson = await postcodeResponse.json();
       const { latitude, longitude } = postcodeJson.result;
 
-      // 2. Fetch Weather Data from OpenWeatherMap
-      if (!OPENWEATHERMAP_API_KEY) {
-        throw new Error('OpenWeatherMap API Key is not configured. Please add REACT_APP_OPENWEATHERMAP_API_KEY to your Vercel environment variables.');
-      }
-      const weatherUrl = `https://api.openweathermap.org/data/2.5/weather?lat=${latitude}&lon=${longitude}&appid=${OPENWEATHERMAP_API_KEY}&units=metric`;
-      const weatherResponse = await fetch(weatherUrl);
-      if (!weatherResponse.ok) {
-        const weatherError = await weatherResponse.json();
-        throw new Error(`Weather API Error: ${weatherError.message}`);
-      }
-      const weatherJson = await weatherResponse.json();
-      setWeatherData(weatherJson);
+      // 2. Fetch Weather Data (can run in parallel)
+      const fetchWeatherData = async () => {
+          if (!OPENWEATHERMAP_API_KEY) {
+            throw new Error('OpenWeatherMap API Key is not configured. Please add REACT_APP_OPENWEATHERMAP_API_KEY to your Vercel environment variables.');
+          }
+          const weatherUrl = `https://api.openweathermap.org/data/2.5/weather?lat=${latitude}&lon=${longitude}&appid=${OPENWEATHERMAP_API_KEY}&units=metric`;
+          const weatherResponse = await fetch(weatherUrl);
+          if (!weatherResponse.ok) {
+            const weatherError = await weatherResponse.json();
+            throw new Error(`Weather API Error: ${weatherError.message}`);
+          }
+          return weatherResponse.json();
+      };
 
-      // 3. Fetch Carbon Intensity data
-      const now = new Date();
-      const from = new Date(now.getTime() - 24 * 60 * 60 * 1000).toISOString();
-      const to = new Date(now.getTime() + 24 * 60 * 60 * 1000).toISOString();
+      // 3. Fetch Carbon Intensity Data using a more robust method
+      const fetchCarbonData = async () => {
+          // ***NEW APPROACH: First, get the region ID from lat/lon, which is more reliable than by postcode***
+          console.log('Fetching region ID from coordinates...');
+          const regionIdUrl = `https://api.carbonintensity.org.uk/regional/ll/${latitude}/${longitude}`;
+          const regionIdResponse = await fetch(regionIdUrl, { headers: { 'Accept': 'application/json' } });
+          if (!regionIdResponse.ok) {
+              throw new Error('Could not determine carbon intensity region from coordinates.');
+          }
+          const regionIdJson = await regionIdResponse.json();
+          const regionInfo = regionIdJson?.data?.[0]?.data?.[0];
+          if (!regionInfo || !regionInfo.regionid) {
+              throw new Error('Carbon Intensity data is not available for this specific location. This can happen for areas outside mainland UK.');
+          }
+          const { regionid, shortname } = regionInfo;
+          setCarbonRegionName(shortname);
+          
+          // Now use the stable region ID to get the intensity data
+          console.log(`Fetching carbon data for region: ${shortname} (ID: ${regionid})`);
+          const now = new Date();
+          const from = new Date(now.getTime() - 24 * 60 * 60 * 1000).toISOString();
+          const to = new Date(now.getTime() + 24 * 60 * 60 * 1000).toISOString();
 
-      console.log('Fetching carbon intensity data...');
-      const regionalUrl = `https://api.carbonintensity.org.uk/regional/intensity/${from}/${to}/postcode/${sanitizedPostcode}`;
-      const nationalUrl = `https://api.carbonintensity.org.uk/intensity/${from}/${to}`;
+          const regionalUrl = `https://api.carbonintensity.org.uk/regional/intensity/${from}/${to}/regionid/${regionid}`;
+          const nationalUrl = `https://api.carbonintensity.org.uk/intensity/${from}/${to}`;
 
-      const [regionalResponse, nationalResponse] = await Promise.all([
-        fetch(regionalUrl),
-        fetch(nationalUrl),
+          const [regionalResponse, nationalResponse] = await Promise.all([
+              fetch(regionalUrl),
+              fetch(nationalUrl)
+          ]);
+          
+          if (!regionalResponse.ok) throw new Error('Failed to fetch regional carbon data using region ID.');
+          if (!nationalResponse.ok) throw new Error('Failed to fetch national carbon data.');
+
+          const regionalJson = await regionalResponse.json();
+          const nationalJson = await nationalResponse.json();
+
+          const regionalIntensityData = regionalJson?.data?.data;
+          const nationalIntensityData = nationalJson?.data;
+
+          if (!regionalIntensityData || !nationalIntensityData) {
+              throw new Error('Incomplete carbon intensity data received from the API.');
+          }
+
+          return { regionalIntensityData, nationalIntensityData };
+      };
+
+      // Run weather and carbon fetches in parallel for speed
+      const [weatherResult, carbonResult] = await Promise.all([
+          fetchWeatherData(),
+          fetchCarbonData()
       ]);
 
-      if (!regionalResponse.ok) {
-        const errorJson = await regionalResponse.json();
-        if (errorJson?.error?.message) {
-          throw new Error(`Carbon Intensity API Error: ${errorJson.error.message}`);
-        }
-        throw new Error('Failed to fetch regional carbon data.');
-      }
-      if (!nationalResponse.ok) throw new Error('Failed to fetch national carbon data.');
+      setWeatherData(weatherResult);
 
-      const regionalJson = await regionalResponse.json();
-      const nationalJson = await nationalResponse.json();
-      
-      // Use optional chaining (?.) for safe nested data access.
-      const regionDataContainer = regionalJson?.data?.[0];
-      const nationalIntensityData = nationalJson?.data;
-
-      // ***FINAL FIX: Add a definitive check to ensure the nested data exists before trying to use it.***
-      if (!regionDataContainer || !regionDataContainer.data || !nationalIntensityData) {
-        throw new Error('Carbon Intensity data is not available for this specific postcode. This can happen for areas outside mainland UK.');
-      }
-
-      const regionName = regionDataContainer.shortname;
-      const regionalIntensityData = regionDataContainer.data;
-      
-      setCarbonRegionName(regionName);
+      const { regionalIntensityData, nationalIntensityData } = carbonResult;
 
       const nationalMap = new Map();
       nationalIntensityData.forEach(item => nationalMap.set(item.from, item.intensity.forecast));
