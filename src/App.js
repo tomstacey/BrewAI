@@ -105,12 +105,14 @@ function App() {
           );
 
           if (!userRegion || !userRegion.data) {
-              console.warn(`Could not find a direct match for '${targetRegionName}'. Defaulting to the first available region in the list.`);
-              // ***FINAL FIX: Instead of looking for a specific fallback, use the first valid region from the API response.***
-              const fallbackRegion = allRegionsData[0];
-               if (!fallbackRegion || !fallbackRegion.data) {
+              console.warn(`Could not find a direct match for '${targetRegionName}'. Defaulting to the first valid region in the list.`);
+              // ***FINAL FIX: Search for the first valid region instead of just assuming the first one is ok.***
+              const fallbackRegion = allRegionsData.find(r => r && r.data && r.data.length > 0);
+
+               if (!fallbackRegion) {
                    throw new Error('Could not find any valid regional data in the API response.');
                 }
+               console.log(`Using fallback region: ${fallbackRegion.shortname}`);
                return { regionalIntensityData: fallbackRegion.data, regionName: fallbackRegion.shortname };
           }
           
