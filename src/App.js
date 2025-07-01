@@ -2,38 +2,37 @@ import React, { useState } from 'react';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
 
 function App() {
-  // --- START DEBUGGING LOGS ---
-  const APP_VERSION = "2.0_DEBUG";
+  // --- App Version for Debugging ---
+  const APP_VERSION = "3.0_ElectricityMaps";
   console.log(`BrewAI App Version: ${APP_VERSION}`);
-  console.log(`Is OpenWeatherMap Key present? ${!!process.env.REACT_APP_OPENWEATHERMAP_API_KEY}`);
-  console.log(`Is Gemini Key present? ${!!process.env.REACT_APP_GEMINI_API_KEY}`);
-  // --- END DEBUGGING LOGS ---
-
+  
+  // --- State Management ---
   const [postcode, setPostcode] = useState('');
   const [carbonData, setCarbonData] = useState(null);
   const [weatherData, setWeatherData] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [showErrorModal, setShowErrorModal] = useState(false);
-  const [carbonRegionName, setCarbonRegionName] = useState('');
   const [carbonSavingTips, setCarbonSavingTips] = useState('');
   const [loadingTips, setLoadingTips] = useState(false);
 
-  // Reads API keys from Vercel's Environment Variables.
+  // --- API Keys from Environment Variables ---
   const OPENWEATHERMAP_API_KEY = process.env.REACT_APP_OPENWEATHERMAP_API_KEY;
+  const ELECTRICITY_MAPS_KEY = process.env.REACT_APP_ELECTRICITY_MAPS_KEY; // <-- NEW KEY
   const GEMINI_API_KEY = process.env.REACT_APP_GEMINI_API_KEY;
 
+  // --- UI Functions ---
   const closeErrorModal = () => {
     setShowErrorModal(false);
     setError(null);
   };
 
+  // --- Core Data Fetching Logic ---
   const fetchData = async () => {
     setLoading(true);
     setError(null);
     setCarbonData(null);
     setWeatherData(null);
-    setCarbonRegionName('');
     setCarbonSavingTips('');
     setShowErrorModal(false);
 
@@ -43,11 +42,25 @@ function App() {
       setLoading(false);
       return;
     }
+    
+    // --- Check for API Keys before fetching ---
+    if (!OPENWEATHERMAP_API_KEY) {
+        setError('OpenWeatherMap API Key is not configured. Please add REACT_APP_OPENWEATHERMAP_API_KEY to your Vercel environment variables.');
+        setShowErrorModal(true);
+        setLoading(false);
+        return;
+    }
+    if (!ELECTRICITY_MAPS_KEY) {
+        setError('Electricity Maps API Key is not configured. Please add REACT_APP_ELECTRICITY_MAPS_KEY to your Vercel environment variables.');
+        setShowErrorModal(true);
+        setLoading(false);
+        return;
+    }
 
     const sanitizedPostcode = postcode.replace(/\s+/g, '');
 
     try {
-      // 1. Get Postcode Details (including admin district for region matching)
+      // 1. Get Location Data from Postcode
       console.log('Fetching postcode data...');
       const postcodeIoUrl = `https://api.postcodes.io/postcodes/${sanitizedPostcode}`;
       const postcodeResponse = await fetch(postcodeIoUrl);
@@ -55,14 +68,10 @@ function App() {
         throw new Error(`Invalid UK Postcode. Please check the postcode entered.`);
       }
       const postcodeJson = await postcodeResponse.json();
-      const { latitude, longitude, admin_district } = postcodeJson.result;
-      console.log(`Postcode maps to district: ${admin_district}`);
+      const { latitude, longitude } = postcodeJson.result;
 
       // 2. Fetch Weather Data
       const fetchWeatherData = async () => {
-          if (!OPENWEATHERMAP_API_KEY) {
-            throw new Error('OpenWeatherMap API Key is not configured. Please add REACT_APP_OPENWEATHERMAP_API_KEY to your Vercel environment variables.');
-          }
           const weatherUrl = `https://api.openweathermap.org/data/2.5/weather?lat=${latitude}&lon=${longitude}&appid=${OPENWEATHERMAP_API_KEY}&units=metric`;
           const weatherResponse = await fetch(weatherUrl);
           if (!weatherResponse.ok) {
@@ -72,134 +81,55 @@ function App() {
           return weatherResponse.json();
       };
       
-      // 3. Fetch Carbon Intensity Data
+      // 3. Fetch Carbon Intensity Data from ELECTRICITY MAPS API
       const fetchCarbonData = async () => {
-          const now = new Date();
-          const from = new Date(now.getTime() - 24 * 60 * 60 * 1000).toISOString();
-          const to = new Date(now.getTime() + 24 * 60 * 60 * 1000).toISOString();
-
-          console.log('Fetching all regional carbon intensity data...');
-          const allRegionsUrl = `https://api.carbonintensity.org.uk/regional/intensity/${from}/${to}`;
-          const allRegionsResponse = await fetch(allRegionsUrl);
-          if (!allRegionsResponse.ok) {
-             console.error('Could not fetch main regional data. Defaulting to national only.');
-             return { regionalIntensityData: null, regionName: null };
-          }
-          const allRegionsJson = await allRegionsResponse.json();
-          const allRegionsData = allRegionsJson?.data;
-
-          if (!allRegionsData || allRegionsData.length === 0) {
-              console.error('Main regional carbon data is empty. Defaulting to national only.');
-              return { regionalIntensityData: null, regionName: null };
-          }
+          console.log('Fetching carbon data from Electricity Maps API...');
+          const headers = { 'auth-token': ELECTRICITY_MAPS_KEY };
           
-          // ***NEW DEBUGGING LOG: This will show us the exact names the API provides.***
-          const availableRegionNames = allRegionsData.map(region => region?.shortname).filter(Boolean);
-          console.log("Available region names from API:", availableRegionNames);
+          // Define URLs for history and forecast
+          const historyUrl = `https://api.electricitymap.org/v3/carbon-intensity/history?lat=${latitude}&lon=${longitude}`;
+          const forecastUrl = `https://api.electricitymap.org/v3/carbon-intensity/forecast?lat=${latitude}&lon=${longitude}`;
 
+          const [historyResponse, forecastResponse] = await Promise.all([
+              fetch(historyUrl, { headers }),
+              fetch(forecastUrl, { headers })
+          ]);
 
-          const districtToRegionMap = {
-              // Scotland
-              'Aberdeen City': 'North Scotland', 'Aberdeenshire': 'North Scotland', 'Highland': 'North Scotland', 'Dundee City': 'North Scotland',
-              'City of Edinburgh': 'South Scotland', 'Glasgow City': 'South Scotland', 'Scottish Borders': 'South Scotland',
-              // Wales
-              'Cardiff': 'South Wales', 'Swansea': 'South Wales', 'Gwynedd': 'North Wales & Merseyside',
-              // England
-              'Cornwall': 'South West England', 'Devon': 'South West England', 'Bristol, City of': 'South West England',
-              'Kent': 'South East England', 'East Sussex': 'South East England', 'Greater London': 'London',
-              'Essex': 'East England', 'Norfolk': 'East England', 'Suffolk': 'East England', 'Cambridgeshire': 'East England', 'Chelmsford': 'East England',
-              'Birmingham': 'West Midlands', 'Coventry': 'West Midlands',
-              'Nottingham': 'East Midlands', 'Leicester': 'East Midlands', 'Derbyshire': 'East Midlands',
-              'Manchester': 'North West England', 'Liverpool': 'North West England', 'Lancashire': 'North West England',
-              'Leeds': 'Yorkshire', 'Sheffield': 'Yorkshire', 'Bradford': 'Yorkshire',
-              'County Durham': 'North East England', 'Northumberland': 'North East England', 'Newcastle upon Tyne': 'North East England',
-          };
+          if (!historyResponse.ok) throw new Error('Failed to fetch carbon intensity history from Electricity Maps.');
+          if (!forecastResponse.ok) throw new Error('Failed to fetch carbon intensity forecast from Electricity Maps.');
 
-          let targetRegionName = districtToRegionMap[admin_district] || admin_district;
-          
-          console.log(`Mapping district to target region: ${targetRegionName}`);
+          const historyJson = await historyResponse.json();
+          const forecastJson = await forecastResponse.json();
 
-          const userRegion = allRegionsData.find(region => {
-              if (region && typeof region.shortname === 'string') {
-                  const regionNameLower = region.shortname.toLowerCase();
-                  const targetNameLower = targetRegionName.toLowerCase();
-                  return regionNameLower === targetNameLower || regionNameLower.includes(targetNameLower) || targetNameLower.includes(regionNameLower);
-              }
-              return false;
-          });
-
-          if (!userRegion || !userRegion.data || userRegion.data.length === 0) {
-              console.warn(`Could not find a match for '${targetRegionName}'. Regional data will not be shown.`);
-              return { regionalIntensityData: null, regionName: null };
+          if (!historyJson.history || !forecastJson.forecast) {
+              throw new Error('Invalid data structure received from Electricity Maps API.');
           }
-          
-          console.log(`Found matching region: ${userRegion.shortname}`);
-          return { regionalIntensityData: userRegion.data, regionName: userRegion.shortname };
-      };
-      
-      const fetchNationalData = async () => {
-          const now = new Date();
-          const from = new Date(now.getTime() - 24 * 60 * 60 * 1000).toISOString();
-          const to = new Date(now.getTime() + 24 * 60 * 60 * 1000).toISOString();
-          const nationalUrl = `https://api.carbonintensity.org.uk/intensity/${from}/${to}`;
-          const nationalResponse = await fetch(nationalUrl);
-          if (!nationalResponse.ok) throw new Error('Failed to fetch national carbon data. The service may be temporarily unavailable.');
-          const nationalJson = await nationalResponse.json();
-          if (!nationalJson?.data || nationalJson.data.length === 0) {
-              throw new Error('National carbon intensity data is currently empty or unavailable from the API.');
-          }
-          return nationalJson.data;
+
+          // Combine history and forecast data into a single array
+          const combinedData = [
+              ...historyJson.history,
+              ...forecastJson.forecast
+          ];
+
+          return combinedData;
       };
 
-      // Run all fetches in parallel
-      const [weatherResult, carbonResult, nationalIntensityData] = await Promise.all([
+      // Run fetches in parallel
+      const [weatherResult, carbonResult] = await Promise.all([
           fetchWeatherData(),
-          fetchCarbonData(),
-          fetchNationalData()
+          fetchCarbonData()
       ]);
 
       setWeatherData(weatherResult);
 
-      const { regionalIntensityData, regionName } = carbonResult;
-      
-      if (regionName) {
-        setCarbonRegionName(regionName);
-      }
-
-      if (!nationalIntensityData) {
-          throw new Error('Could not retrieve national carbon intensity data. The service may be down.');
-      }
-      
-      const nationalMap = new Map();
-      nationalIntensityData.forEach(item => {
-        if (item && item.from && item.intensity && typeof item.intensity.forecast !== 'undefined') {
-            nationalMap.set(item.from, item.intensity.forecast);
-        }
-      });
-      
-      let mergedData = nationalIntensityData.map(nationalItem => ({
-          isoTime: nationalItem.from,
-          localIntensity: null,
-          nationalIntensity: nationalItem.intensity.forecast,
-      }));
-      
-      if (regionalIntensityData) {
-          const regionalMap = new Map();
-          regionalIntensityData.forEach(item => {
-              if (item && item.from && item.intensity && typeof item.intensity.forecast !== 'undefined') {
-                  regionalMap.set(item.from, item.intensity.forecast);
-              }
-          });
-          
-          mergedData.forEach(item => {
-              if (regionalMap.has(item.isoTime)) {
-                  item.localIntensity = regionalMap.get(item.isoTime);
-              }
-          });
-      }
-
-      const finalChartData = mergedData
-        .filter(item => item.nationalIntensity !== null)
+      // Process the new data structure from Electricity Maps
+      const finalChartData = carbonResult
+        .map(item => ({
+          isoTime: item.datetime,
+          // The API provides one reliable value, which we will display
+          gridIntensity: item.carbonIntensity,
+        }))
+        .filter(item => item.gridIntensity !== null && typeof item.gridIntensity !== 'undefined')
         .sort((a, b) => new Date(a.isoTime) - new Date(b.isoTime))
         .map(item => ({
           ...item,
@@ -236,13 +166,9 @@ function App() {
           return currDiff < prevDiff ? curr : prev;
       });
 
-      const currentLocalIntensity = latestCarbon.localIntensity;
-      const currentNationalIntensity = latestCarbon.nationalIntensity;
+      const currentIntensity = latestCarbon.gridIntensity;
       
-      const promptRegion = carbonRegionName || 'your region';
-      const promptLocalIntensity = currentLocalIntensity ? `${currentLocalIntensity} gCO2/kWh` : 'an unknown value';
-
-      const prompt = `Given that the current carbon intensity in ${promptRegion} is ${promptLocalIntensity} (compared to a national average of ${currentNationalIntensity} gCO2/kWh), provide 3 concise and actionable tips for a UK household to reduce their electricity carbon footprint. If the local intensity is unknown, base the tips on the national average. Format the response as a simple list.`;
+      const prompt = `The current carbon intensity of the GB electricity grid is ${currentIntensity} gCO2/kWh. Provide 3 concise and actionable tips for a UK household to reduce their electricity carbon footprint. Format the response as a simple list.`;
 
       const payload = { contents: [{ role: "user", parts: [{ text: prompt }] }] };
       const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${GEMINI_API_KEY}`;
@@ -345,7 +271,6 @@ function App() {
             <h2 className="text-2xl font-bold text-gray-900 mb-2 text-center">
               Carbon Intensity (gCO₂/kWh)
             </h2>
-            {!carbonRegionName && <p className="text-center text-sm text-gray-500 mb-4">Regional data unavailable, showing National Average only.</p>}
             <ResponsiveContainer width="100%" height={400}>
               <LineChart
                 data={carbonData}
@@ -372,27 +297,17 @@ function App() {
                     border: '1px solid #ddd'
                   }}
                   labelStyle={{ fontWeight: 'bold', color: '#333' }}
-                  formatter={(value, name) => [`${value}`, name === 'localIntensity' ? `Your Area (${carbonRegionName})` : 'National Average']}
+                  formatter={(value) => [`${value}`]}
                 />
                 <Legend wrapperStyle={{ paddingTop: '20px' }} />
                 
-                {carbonRegionName && <Line
+                <Line
                   type="monotone"
-                  dataKey="localIntensity"
+                  dataKey="gridIntensity"
                   stroke="#8884d8"
                   strokeWidth={3}
                   activeDot={{ r: 8 }}
-                  name={`Your Area (${carbonRegionName})`}
-                  dot={false}
-                />}
-
-                <Line
-                  type="monotone"
-                  dataKey="nationalIntensity"
-                  stroke="#82ca9d"
-                  strokeWidth={3}
-                  activeDot={{ r: 8 }}
-                  name="National Average"
+                  name="GB Grid Intensity"
                   dot={false}
                 />
               </LineChart>
