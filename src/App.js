@@ -2,6 +2,14 @@ import React, { useState } from 'react';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
 
 function App() {
+  // --- START DEBUGGING LOGS ---
+  // This will print to your browser's developer console to help troubleshoot.
+  const APP_VERSION = "1.7_DEBUG";
+  console.log(`BrewAI App Version: ${APP_VERSION}`);
+  console.log(`Is OpenWeatherMap Key present? ${!!process.env.REACT_APP_OPENWEATHERMAP_API_KEY}`);
+  console.log(`Is Gemini Key present? ${!!process.env.REACT_APP_GEMINI_API_KEY}`);
+  // --- END DEBUGGING LOGS ---
+
   const [postcode, setPostcode] = useState('');
   const [carbonData, setCarbonData] = useState(null);
   const [weatherData, setWeatherData] = useState(null);
@@ -120,7 +128,6 @@ function App() {
           const nationalResponse = await fetch(nationalUrl);
           if (!nationalResponse.ok) throw new Error('Failed to fetch national carbon data. The service may be temporarily unavailable.');
           const nationalJson = await nationalResponse.json();
-          // ***FIX: Add a check for empty data array to prevent silent failure***
           if (!nationalJson?.data || nationalJson.data.length === 0) {
               throw new Error('National carbon intensity data is currently empty or unavailable from the API.');
           }
