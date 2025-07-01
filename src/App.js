@@ -3,8 +3,7 @@ import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, Responsi
 
 function App() {
   // --- START DEBUGGING LOGS ---
-  // This will print to your browser's developer console to help troubleshoot.
-  const APP_VERSION = "1.9_FINAL";
+  const APP_VERSION = "2.0_DEBUG";
   console.log(`BrewAI App Version: ${APP_VERSION}`);
   console.log(`Is OpenWeatherMap Key present? ${!!process.env.REACT_APP_OPENWEATHERMAP_API_KEY}`);
   console.log(`Is Gemini Key present? ${!!process.env.REACT_APP_GEMINI_API_KEY}`);
@@ -93,6 +92,11 @@ function App() {
               console.error('Main regional carbon data is empty. Defaulting to national only.');
               return { regionalIntensityData: null, regionName: null };
           }
+          
+          // ***NEW DEBUGGING LOG: This will show us the exact names the API provides.***
+          const availableRegionNames = allRegionsData.map(region => region?.shortname).filter(Boolean);
+          console.log("Available region names from API:", availableRegionNames);
+
 
           const districtToRegionMap = {
               // Scotland
@@ -115,12 +119,10 @@ function App() {
           
           console.log(`Mapping district to target region: ${targetRegionName}`);
 
-          // ***DEFINITIVE FIX: Use a case-insensitive and more flexible search***
           const userRegion = allRegionsData.find(region => {
               if (region && typeof region.shortname === 'string') {
                   const regionNameLower = region.shortname.toLowerCase();
                   const targetNameLower = targetRegionName.toLowerCase();
-                  // Check for exact match, or if one contains the other
                   return regionNameLower === targetNameLower || regionNameLower.includes(targetNameLower) || targetNameLower.includes(regionNameLower);
               }
               return false;
