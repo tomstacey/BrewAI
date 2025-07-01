@@ -4,7 +4,7 @@ import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, Responsi
 function App() {
   // --- START DEBUGGING LOGS ---
   // This will print to your browser's developer console to help troubleshoot.
-  const APP_VERSION = "1.8_FINAL";
+  const APP_VERSION = "1.9_FINAL";
   console.log(`BrewAI App Version: ${APP_VERSION}`);
   console.log(`Is OpenWeatherMap Key present? ${!!process.env.REACT_APP_OPENWEATHERMAP_API_KEY}`);
   console.log(`Is Gemini Key present? ${!!process.env.REACT_APP_GEMINI_API_KEY}`);
@@ -94,7 +94,6 @@ function App() {
               return { regionalIntensityData: null, regionName: null };
           }
 
-          // ***DEFINITIVE FIX: Use an explicit mapping from district to DNO region***
           const districtToRegionMap = {
               // Scotland
               'Aberdeen City': 'North Scotland', 'Aberdeenshire': 'North Scotland', 'Highland': 'North Scotland', 'Dundee City': 'North Scotland',
@@ -112,19 +111,20 @@ function App() {
               'County Durham': 'North East England', 'Northumberland': 'North East England', 'Newcastle upon Tyne': 'North East England',
           };
 
-          let targetRegionName = districtToRegionMap[admin_district] || null;
+          let targetRegionName = districtToRegionMap[admin_district] || admin_district;
           
-          if (targetRegionName) {
-            console.log(`Found direct map from '${admin_district}' to '${targetRegionName}'`);
-          } else {
-            console.log(`No direct map found for '${admin_district}', attempting to search...`);
-            // Fallback to searching if no direct map exists
-            targetRegionName = admin_district;
-          }
+          console.log(`Mapping district to target region: ${targetRegionName}`);
 
-          const userRegion = allRegionsData.find(region => 
-            region && typeof region.shortname === 'string' && (region.shortname === targetRegionName || region.shortname.includes(targetRegionName) || targetRegionName.includes(region.shortname))
-          );
+          // ***DEFINITIVE FIX: Use a case-insensitive and more flexible search***
+          const userRegion = allRegionsData.find(region => {
+              if (region && typeof region.shortname === 'string') {
+                  const regionNameLower = region.shortname.toLowerCase();
+                  const targetNameLower = targetRegionName.toLowerCase();
+                  // Check for exact match, or if one contains the other
+                  return regionNameLower === targetNameLower || regionNameLower.includes(targetNameLower) || targetNameLower.includes(regionNameLower);
+              }
+              return false;
+          });
 
           if (!userRegion || !userRegion.data || userRegion.data.length === 0) {
               console.warn(`Could not find a match for '${targetRegionName}'. Regional data will not be shown.`);
