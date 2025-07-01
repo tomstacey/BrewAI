@@ -3,7 +3,7 @@ import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, Responsi
 
 function App() {
   // --- App Version for Debugging ---
-  const APP_VERSION = "3.0_ElectricityMaps";
+  const APP_VERSION = "3.1_ElectricityMaps_HistoryOnly";
   console.log(`BrewAI App Version: ${APP_VERSION}`);
   
   // --- State Management ---
@@ -18,7 +18,7 @@ function App() {
 
   // --- API Keys from Environment Variables ---
   const OPENWEATHERMAP_API_KEY = process.env.REACT_APP_OPENWEATHERMAP_API_KEY;
-  const ELECTRICITY_MAPS_KEY = process.env.REACT_APP_ELECTRICITY_MAPS_KEY; // <-- NEW KEY
+  const ELECTRICITY_MAPS_KEY = process.env.REACT_APP_ELECTRICITY_MAPS_KEY;
   const GEMINI_API_KEY = process.env.REACT_APP_GEMINI_API_KEY;
 
   // --- UI Functions ---
@@ -43,7 +43,6 @@ function App() {
       return;
     }
     
-    // --- Check for API Keys before fetching ---
     if (!OPENWEATHERMAP_API_KEY) {
         setError('OpenWeatherMap API Key is not configured. Please add REACT_APP_OPENWEATHERMAP_API_KEY to your Vercel environment variables.');
         setShowErrorModal(true);
@@ -86,32 +85,23 @@ function App() {
           console.log('Fetching carbon data from Electricity Maps API...');
           const headers = { 'auth-token': ELECTRICITY_MAPS_KEY };
           
-          // Define URLs for history and forecast
+          // ***FIX: Only fetch historical data, as forecast data may not be on the free plan.***
           const historyUrl = `https://api.electricitymap.org/v3/carbon-intensity/history?lat=${latitude}&lon=${longitude}`;
-          const forecastUrl = `https://api.electricitymap.org/v3/carbon-intensity/forecast?lat=${latitude}&lon=${longitude}`;
+          
+          const historyResponse = await fetch(historyUrl, { headers });
 
-          const [historyResponse, forecastResponse] = await Promise.all([
-              fetch(historyUrl, { headers }),
-              fetch(forecastUrl, { headers })
-          ]);
-
-          if (!historyResponse.ok) throw new Error('Failed to fetch carbon intensity history from Electricity Maps.');
-          if (!forecastResponse.ok) throw new Error('Failed to fetch carbon intensity forecast from Electricity Maps.');
-
+          if (!historyResponse.ok) {
+              const errorBody = await historyResponse.json();
+              throw new Error(`Failed to fetch carbon intensity history from Electricity Maps: ${errorBody.message || 'Check API Key and plan.'}`);
+          }
+          
           const historyJson = await historyResponse.json();
-          const forecastJson = await forecastResponse.json();
 
-          if (!historyJson.history || !forecastJson.forecast) {
+          if (!historyJson.history) {
               throw new Error('Invalid data structure received from Electricity Maps API.');
           }
 
-          // Combine history and forecast data into a single array
-          const combinedData = [
-              ...historyJson.history,
-              ...forecastJson.forecast
-          ];
-
-          return combinedData;
+          return historyJson.history; // Return only the historical data
       };
 
       // Run fetches in parallel
@@ -126,7 +116,6 @@ function App() {
       const finalChartData = carbonResult
         .map(item => ({
           isoTime: item.datetime,
-          // The API provides one reliable value, which we will display
           gridIntensity: item.carbonIntensity,
         }))
         .filter(item => item.gridIntensity !== null && typeof item.gridIntensity !== 'undefined')
@@ -159,16 +148,12 @@ function App() {
         throw new Error("No carbon intensity data available to generate tips.");
       }
       
-      const now = new Date().getTime();
-      const latestCarbon = carbonData.reduce((prev, curr) => {
-          const prevDiff = Math.abs(new Date(prev.isoTime).getTime() - now);
-          const currDiff = Math.abs(new Date(curr.isoTime).getTime() - now);
-          return currDiff < prevDiff ? curr : prev;
-      });
+      // Use the most recent point from the historical data
+      const latestCarbon = carbonData[carbonData.length - 1];
 
       const currentIntensity = latestCarbon.gridIntensity;
       
-      const prompt = `The current carbon intensity of the GB electricity grid is ${currentIntensity} gCO2/kWh. Provide 3 concise and actionable tips for a UK household to reduce their electricity carbon footprint. Format the response as a simple list.`;
+      const prompt = `The most recent carbon intensity of the GB electricity grid was ${currentIntensity} gCO2/kWh. Provide 3 concise and actionable tips for a UK household to reduce their electricity carbon footprint. Format the response as a simple list.`;
 
       const payload = { contents: [{ role: "user", parts: [{ text: prompt }] }] };
       const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${GEMINI_API_KEY}`;
@@ -269,7 +254,7 @@ function App() {
         {carbonData && carbonData.length > 0 && (
           <div className="bg-white rounded-xl shadow-lg p-4 md:p-6 mb-6">
             <h2 className="text-2xl font-bold text-gray-900 mb-2 text-center">
-              Carbon Intensity (gCO₂/kWh)
+              Historical Carbon Intensity (Last 24h)
             </h2>
             <ResponsiveContainer width="100%" height={400}>
               <LineChart
