@@ -4,7 +4,7 @@ import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, Responsi
 function App() {
   // --- START DEBUGGING LOGS ---
   // This will print to your browser's developer console to help troubleshoot.
-  const APP_VERSION = "1.7_DEBUG";
+  const APP_VERSION = "1.8_FINAL";
   console.log(`BrewAI App Version: ${APP_VERSION}`);
   console.log(`Is OpenWeatherMap Key present? ${!!process.env.REACT_APP_OPENWEATHERMAP_API_KEY}`);
   console.log(`Is Gemini Key present? ${!!process.env.REACT_APP_GEMINI_API_KEY}`);
@@ -94,21 +94,36 @@ function App() {
               return { regionalIntensityData: null, regionName: null };
           }
 
-          const getRegionFromDistrict = (district) => {
-              const districtLower = district.toLowerCase();
-              if (districtLower.includes('council') || districtLower.includes('city of')) {
-                  const mainName = district.replace(/council|city of/gi, '').trim();
-                  if (mainName.includes('Edinburgh') || mainName.includes('Glasgow') || mainName.includes('Aberdeen')) return 'South Scotland';
-                  if (mainName.includes('Dundee')) return 'North Scotland';
-              }
-              return admin_district;
+          // ***DEFINITIVE FIX: Use an explicit mapping from district to DNO region***
+          const districtToRegionMap = {
+              // Scotland
+              'Aberdeen City': 'North Scotland', 'Aberdeenshire': 'North Scotland', 'Highland': 'North Scotland', 'Dundee City': 'North Scotland',
+              'City of Edinburgh': 'South Scotland', 'Glasgow City': 'South Scotland', 'Scottish Borders': 'South Scotland',
+              // Wales
+              'Cardiff': 'South Wales', 'Swansea': 'South Wales', 'Gwynedd': 'North Wales & Merseyside',
+              // England
+              'Cornwall': 'South West England', 'Devon': 'South West England', 'Bristol, City of': 'South West England',
+              'Kent': 'South East England', 'East Sussex': 'South East England', 'Greater London': 'London',
+              'Essex': 'East England', 'Norfolk': 'East England', 'Suffolk': 'East England', 'Cambridgeshire': 'East England', 'Chelmsford': 'East England',
+              'Birmingham': 'West Midlands', 'Coventry': 'West Midlands',
+              'Nottingham': 'East Midlands', 'Leicester': 'East Midlands', 'Derbyshire': 'East Midlands',
+              'Manchester': 'North West England', 'Liverpool': 'North West England', 'Lancashire': 'North West England',
+              'Leeds': 'Yorkshire', 'Sheffield': 'Yorkshire', 'Bradford': 'Yorkshire',
+              'County Durham': 'North East England', 'Northumberland': 'North East England', 'Newcastle upon Tyne': 'North East England',
           };
+
+          let targetRegionName = districtToRegionMap[admin_district] || null;
           
-          const targetRegionName = getRegionFromDistrict(admin_district);
-          console.log(`Mapping district to target region: ${targetRegionName}`);
+          if (targetRegionName) {
+            console.log(`Found direct map from '${admin_district}' to '${targetRegionName}'`);
+          } else {
+            console.log(`No direct map found for '${admin_district}', attempting to search...`);
+            // Fallback to searching if no direct map exists
+            targetRegionName = admin_district;
+          }
 
           const userRegion = allRegionsData.find(region => 
-            region && typeof region.shortname === 'string' && (region.shortname.includes(targetRegionName) || targetRegionName.includes(region.shortname))
+            region && typeof region.shortname === 'string' && (region.shortname === targetRegionName || region.shortname.includes(targetRegionName) || targetRegionName.includes(region.shortname))
           );
 
           if (!userRegion || !userRegion.data || userRegion.data.length === 0) {
