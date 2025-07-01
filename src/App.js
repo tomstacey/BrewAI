@@ -120,7 +120,11 @@ function App() {
           const nationalResponse = await fetch(nationalUrl);
           if (!nationalResponse.ok) throw new Error('Failed to fetch national carbon data. The service may be temporarily unavailable.');
           const nationalJson = await nationalResponse.json();
-          return nationalJson?.data;
+          // ***FIX: Add a check for empty data array to prevent silent failure***
+          if (!nationalJson?.data || nationalJson.data.length === 0) {
+              throw new Error('National carbon intensity data is currently empty or unavailable from the API.');
+          }
+          return nationalJson.data;
       };
 
       // Run all fetches in parallel
@@ -193,7 +197,6 @@ function App() {
     setLoadingTips(true);
     setCarbonSavingTips('');
     try {
-      // ***FIX: Check for the Gemini API Key***
       if (!GEMINI_API_KEY) {
           throw new Error('Gemini API Key is not configured. Please add REACT_APP_GEMINI_API_KEY to your Vercel environment variables.');
       }
@@ -218,7 +221,6 @@ function App() {
       const prompt = `Given that the current carbon intensity in ${promptRegion} is ${promptLocalIntensity} (compared to a national average of ${currentNationalIntensity} gCO2/kWh), provide 3 concise and actionable tips for a UK household to reduce their electricity carbon footprint. If the local intensity is unknown, base the tips on the national average. Format the response as a simple list.`;
 
       const payload = { contents: [{ role: "user", parts: [{ text: prompt }] }] };
-      // ***FIX: Use the GEMINI_API_KEY from environment variables***
       const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${GEMINI_API_KEY}`;
 
       const response = await fetch(apiUrl, {
